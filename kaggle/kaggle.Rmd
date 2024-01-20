@@ -1,0 +1,343 @@
+---
+title: "boosting"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(randomForest)
+
+X_test <- read_csv("X_test.csv",show_col_types = FALSE)
+
+X_train <- read_csv("X_train.csv",show_col_types = FALSE)
+
+y_train <- read_csv("y_train.csv",show_col_types = FALSE)
+
+```
+## combine train x and y
+```{r}
+onlyscaled_df <- cbind(X_train[,-1], y_train[,2])
+train <- sample(1: nrow (onlyscaled_df), nrow (onlyscaled_df)*0.7)
+```
+
+## transfer district to one-hot coding 
+```{r}
+library(dplyr)
+onlyscaled_df$district<-as.factor(onlyscaled_df$district)
+district_dummies <- model.matrix(~district-1,onlyscaled_df) %>% as.data.frame()
+onlyscaled_df$district<-NULL
+onlyscaled_df <- cbind(onlyscaled_df,district_dummies)
+```
+
+```{r}
+plotdf <- cbind(X_train[,-1], y_train[,2])
+colnames(plotdf)
+```
+
+## visualize the original data
+```{r}
+# 导入 ggplot2 和 gridExtra 包
+library(ggplot2)
+library(gridExtra)
+
+# 假设你已经创建了三个箱线图 p1、p2、p3
+# 可以根据你实际的数据和绘图情况进行适当调整
+p1 <- ggplot(plotdf, aes(x = factor(self_eval), y = y)) +
+  geom_boxplot(color = "steelblue") + xlab("Self_Eval")+
+  labs(title = "Boxplot of self_eval")+
+   theme(plot.title = element_text(face = "bold", size = 12, hjust = 0.5))
+
+p2 <- ggplot(plotdf, aes(x = factor(teacher_eval), y = y)) +
+  geom_boxplot(color = "steelblue") +xlab("Teacher_Eval")+
+  labs(title = "Boxplot of teacher_eval")+
+  theme(plot.title = element_text(face = "bold", size = 12, hjust = 0.5))
+
+p3 <- ggplot(plotdf, aes(x = factor(district), y = y)) +
+  geom_boxplot(color = "steelblue") +xlab("District")+
+  labs(title = "Boxplot of district")+
+    theme(plot.title = element_text(face = "bold", size = 12, hjust = 0.5))
+
+# 将三个图并排放在一起
+p<-grid.arrange(p1, p2, p3, ncol = 3)
+
+
+ggsave("D:/2023fall/stats415/project/normalreport//boxplot_eval_district.png", plot = p, width = 8, height = 6, units = "in", dpi = 300)
+```
+## plot the periodogram plot for SRP
+```{r}
+library(TSA)
+p1<- periodogram(t(plotdf[1,4:53]),ylab='Variable Star Periodogram'); abline(h=0)
+p2<- periodogram(t(X_test[1,5:54]),ylab='Variable Star Periodogram'); abline(h=0)
+
+
+
+first_row <- t(plotdf[1,4:53])
+```
+
+## create SRP plot for the first train observation and first test observation
+```{r}
+# 创建
+df <- data.frame(x = 1:50, y = as.numeric(first_row))
+
+p3<-ggplot(df, aes(x = 1:50, y = y)) +
+  geom_line() +
+  labs(title = "Line Plot of SRP_1 to SRP_50 for the first train observation",
+       x = "DAYS",
+       y = "SRP")
+p3
+# 
+
+first_row <- t(X_test[1,5:54])
+
+df <- data.frame(x = 1:50, y = as.numeric(first_row))
+
+p4<-ggplot(df, aes(x = 1:50, y = y)) +
+  geom_line() +
+  labs(title = "Line Plot of SRP_1 to SRP_50 for the first test observation",
+       x = "DAYS",
+       y = "SRP")
+p4
+# p<-grid.arrange(p1, p2,  ncol = 2)
+
+p<-grid.arrange(p3,p4, ncol = 2)
+```
+
+
+## scale the train data 
+```{r}
+for(i in 1:52){
+  onlyscaled_df[, i] <- scale(onlyscaled_df[,i])
+}
+```
+
+## transfer district in test to hot-coding 
+```{r}
+test.in<-X_test[,-1]
+test.in$district<-as.factor(test.in$district)
+testdistrict_dummies<-model.matrix(~district-1,test.in) %>% as.data.frame()
+test.in$district<-NULL
+test.in<-cbind(test.in,testdistrict_dummies)
+
+```
+
+## scale the test dataset
+```{r}
+for(i in 1:52){
+  test.in[, i] <- scale(test.in[,i])
+}
+```
+
+## add variance parameter for both train and test data
+```{r}
+onlyscaled_df$avspr <- rowMeans(onlyscaled_df[,3:52])
+onlyscaled_df$varsrp <- apply(onlyscaled_df[, 3:52], 1, var)
+
+ test.in$avspr <- rowMeans( test.in[,3:52])
+ test.in$varsrp <- apply( test.in[, 3:52], 1, var)
+```
+
+## calculate periodogram and extract frequency information for each SRP and find the maximum possibility frequency for each line and store in freq1 and freq2, store in the data for both train and test
+```{r}
+library(TSA)
+freq1<-c()
+freq2<-c()
+freq3<-c()
+for(i in 1:nrow(onlyscaled_df)){
+  p = periodogram(t(onlyscaled_df[i,3:52]),ylab='Variable Star Periodogram',plot=FALSE);  
+  spec_density <- p$spec
+
+# 找到可能性最大的两个频率的索引
+ max_indices <- order(spec_density, decreasing = TRUE)[1:2]
+
+# 获取对应的频率值
+ max_frequencies <- p$freq[max_indices]
+
+ freq1<-c(freq1,max_frequencies[1])
+ freq2<-c(freq2,max_frequencies[2])
+   freq3<-c(freq3,max_frequencies[3])
+}
+```
+
+
+```{r}
+onlyscaled_df$period1 <- 1/freq1
+onlyscaled_df$period2 <- 1/freq2
+onlyscaled_df$period3<- 1/freq3
+onlyscaled_df$freq1 <- freq1
+onlyscaled_df$freq2 <- freq2
+onlyscaled_df$freq3<- freq3
+
+# onlyscaled_df$freq3 <- NULL
+```
+
+```{r}
+freq1<-c()
+freq2<-c()
+freq3<-c()
+for(i in 1:nrow(test.in)){
+  p = periodogram(t(test.in[i,3:52]),ylab='Variable Star Periodogram',plot=FALSE);  
+  spec_density <- p$spec
+
+# 找到可能性最大的两个频率的索引
+ max_indices <- order(spec_density, decreasing = TRUE)[1:2]
+
+# 获取对应的频率值
+ max_frequencies <- p$freq[max_indices]
+
+ freq1<-c(freq1,max_frequencies[1])
+ freq2<-c(freq2,max_frequencies[2])
+ freq3<-c(freq3,max_frequencies[3])
+}
+```
+
+```{r}
+test.in$period1 <- 1/freq1
+test.in$period2 <- 1/freq2
+test.in$period3<- 1/freq3
+test.in$freq1 <- freq1
+test.in$freq2 <- freq2
+test.in$freq3<- freq3
+```
+
+```{r}
+ onlyscaled_df <- onlyscaled_df[,-c(3:52)]
+ test.in<-test.in[,-c(3:52)]
+```
+
+
+## randomly select training data to build regression model 
+```{r}
+set.seed(1)
+trainidx <- sample(1:nrow(onlyscaled_df),nrow(onlyscaled_df)*0.8,replace = FALSE)
+
+traindf <- onlyscaled_df[trainidx,]
+# traindf$avspr <- rowMeans(traindf[,3:52])
+# traindf$varsrp <- apply(traindf[, 3:52], 1, var)
+testdf<-onlyscaled_df[-trainidx,]
+# testdf$avspr <- rowMeans(testdf[,3:52])
+# testdf$varsrp <- apply(testdf[, 3:52], 1, var)
+```
+
+```{r}
+library(xgboost)
+
+set.seed(1)
+
+for(m in 1:30){
+  totpred <- data.frame(matrix(ncol = 0, nrow = nrow(testdf)))
+for(i in 1:20){
+
+train <- sample(1: nrow (traindf), nrow (traindf), replace = TRUE)
+# 假设你的数据存储在一个数据框（data.frame）中，例如df
+data <- as.matrix(traindf[train, -3])  # 不包含目标变量的特征矩阵
+label <- traindf[train,3]  # Labels (not scaled)
+  
+  # Scale the labels
+ #label_scaled <- scale(label)
+
+dtrain <- xgb.DMatrix(data = data, label = label)
+# 设置参数
+params <- list(
+  objective = "reg:squarederror",  # 这里以回归问题为例，可以根据你的问题调整
+  eval_metric = "rmse"  # 评估指标，可以根据你的问题调整
+)
+
+# 训练模型
+model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 100+10*m,  # 迭代次数，可以根据需要调整
+  verbose = 1,  # 打印详细信息
+  max_depth = 4,
+   eta = 0.30,
+  gamma = 0,
+  colsample_bytree = 0.8,
+  min_child_weight =1,
+  subsample = 1
+)
+
+
+
+# 预测
+predictions <- predict(model, as.matrix(testdf[,-3]))
+
+#predictions <- predictions * sd(label) + mean(label)
+
+
+totpred <- cbind(totpred, predictions)
+
+}
+  
+  
+library(caret)
+predicted_values<- rowMeans(totpred[,1:20])
+actual_values <- testdf[, 3] 
+
+mean_actual <- mean(actual_values)
+numerator <- sum((actual_values - predicted_values)^2)
+denominator <- sum((actual_values - mean_actual)^2)
+r_squared <- 1 - (numerator / denominator)
+
+# Print the R-squared value
+cat("nrounds: ",100+10*m,"\n")
+cat("eta: ",0.3,"\n")
+cat("R-squared:", r_squared, "\n")
+}
+```
+
+
+
+
+```{r}
+library(caret)
+library(pROC)
+
+# 设置拟合条件
+fitControl <- trainControl(method = "boot", 
+                           number = 8000,
+                           verboseIter = FALSE,
+                           search = "random" # 随机搜索，也可设定 "grid" 网格搜索
+                           )
+# XGBoost 调参
+caret_xgb <- train(y~.,
+                   data = onlyscaled_df,
+                   method="xgbTree",# xgbLinear
+                   trainControl=fitControl
+                   )
+
+```
+
+```{r}
+caret_xgb$bestTune
+```
+
+```{r}
+caret_best <- caret_xgb$finalModel
+test.in<-onlyscaled_df[-train,-54]
+caret_pred <- predict(caret_best,as.matrix(test.in))
+```
+
+```{r}
+mse_rf <- mean((y_train[-train,]$y - caret_pred)^2)
+r2_rf <- cor(y_train[-train,]$y, caret_pred)^2
+cat("coefficient: ",i,mse_rf,"\n")
+cat("coefficient: ",i,r2_rf,"\n")
+```
+
+
+```{r}
+caret_best <- caret_xgb$finalModel
+
+caret_pred <- predict(caret_best,as.matrix(test.in))
+results <- data.frame(SEQN = X_test$SEQN, y =caret_pred)
+
+# 将结果输出为CSV文件
+write.csv(results, "./caret_best\.csv", row.names = FALSE)
+```
+
+
