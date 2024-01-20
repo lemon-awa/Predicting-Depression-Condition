@@ -1,0 +1,381 @@
+---
+title: "415-proj-problem2"
+output: html_document
+date: "2023-11-05"
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(haven)
+library(tidyverse)
+library(broom)
+library(boot)
+library(gridExtra)
+library(ROSE)
+library(caret)
+library(class)
+```
+
+## load appropriate data
+
+```{r}
+ds <- read.csv("depress_social.csv")
+ds$depression <- ifelse(ds$score>=10,TRUE,FALSE)
+```
+
+## logistic regression
+```{r}
+model1 <- glm(depression ~ ratetopoverty, family = "binomial", data = ds)
+summary(model1)
+```
+
+```{r}
+data <- ds
+data$depression <- as.numeric(data$depression)
+
+model <- glm(depression ~ martial + education + ratetopoverty, data = data, family = "binomial")
+
+summary(model)
+```
+
+## bootstrap function
+
+```{r}
+bootstrap_ci <- function(data, n_bootstrap, model_formula) {
+  bootstrap_results <- replicate(n_bootstrap, {
+    sample_data <- data[sample(nrow(data), replace = TRUE), ]
+    model <- glm(model_formula, data = sample_data, family = "binomial")
+    predict(model, type = "response")
+  })
+  ci_lower <- apply(bootstrap_results, 1, function(x) quantile(x, probs = 0.025))
+  ci_upper <- apply(bootstrap_results, 1, function(x) quantile(x, probs = 0.975))
+  
+  return(data.frame(ci_lower, ci_upper))
+}
+
+n_bootstrap <- 1000
+```
+
+## education level
+
+```{r}
+bootstrap_ci <- function(data, indices) {
+  d <- data[indices] 
+  return(mean(d))
+}
+
+education_levels <- unique(ds$education)
+results_education <- data.frame(Education_Level = education_levels, 
+                                 Lower_CI = rep(0, length(education_levels)), 
+                                 Upper_CI = rep(0, length(education_levels)))
+
+for (level in education_levels) {
+  depression_data <- data[data$education == level, "depression"]
+  boot_obj <- boot(depression_data, bootstrap_ci, R = 1000)
+  ci <- boot.ci(boot_obj, type = "perc", conf = 0.95)
+  results_education[results_education$Education_Level == level, c("Lower_CI", "Upper_CI")] <- ci$percent[4:5]
+}
+```
+
+```{r}
+results_education
+```
+
+```{r}
+ ggplot(results_education, aes(x = education_levels , y = (Lower_CI + Upper_CI) / 2)) +
+  geom_col(fill = "skyblue", width = 0.5) +
+  labs(title = "Average Depression Probability by Education Level",
+       x = "Education Level",
+       y = "Average Depression Probability") +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ggplot(results_education, aes(x = education_levels)) +
+  geom_line(aes(y = Lower_CI, color = "Lower CI"), size = 1) + 
+  geom_line(aes(y = Upper_CI, color = "Upper CI"), size = 1) +
+  labs(title = "Confidence Intervals for Depression Probability by Education Level",
+       x = "Education Level",
+       y = "Depression Probability",
+       color = "Confidence Interval") +  
+  scale_color_manual(values = c("Lower CI" = "blue", "Upper CI" = "red")) +
+  theme_minimal()+
+  theme(legend.position = c(0.8, 0.8))+
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+## martial
+
+```{r}
+# Calculate 99% confidence intervals for each material value
+martial_values <- unique(ds$martial)
+results_martial <- data.frame(Martial_Value = martial_values, 
+                               Lower_CI = rep(0, length(martial_values)), 
+                               Upper_CI = rep(0, length(martial_values)))
+
+for (value in martial_values) {
+  depression_data <- data[data$martial == value, "depression"]
+  boot_obj <- boot(depression_data, bootstrap_ci, R = 1000)
+  ci <- boot.ci(boot_obj, type = "perc", conf = 0.99) # Update here for 99% CI
+  results_martial[results_martial$Martial_Value == value, c("Lower_CI", "Upper_CI")] <- ci$percent[4:5]
+}
+```
+
+```{r}
+results_martial
+```
+
+```{r}
+ggplot(results_martial, aes(x = martial_values , y = (Lower_CI + Upper_CI) / 2)) +
+  geom_col(fill = "skyblue") +
+  labs(title = "Average Depression Probability by Martial Value",
+       x = "Martial Value",
+       y = "Average Depression Probability") +
+  theme_minimal()
+```
+
+```{r}
+custom_labels <- data.frame(
+  martial_values = c(1,2,3), 
+  custom_labels = c("married", "divorced", "spinsterhood")  
+)
+
+ggplot(results_martial, aes(x = martial_values)) +
+  geom_line(aes(y = Lower_CI, color = "Lower CI"), size = 1) + 
+  geom_line(aes(y = Upper_CI, color = "Upper CI"), size = 1) +
+  labs(title = "Confidence Intervals for Depression Probability by Martial values",
+       x = "Martial Values",
+       y = "Depression Probability",
+       color = "Confidence Interval") +  
+  scale_color_manual(values = c( "Upper CI" = "red","Lower CI" = "blue")) +
+  theme_minimal() +
+  scale_x_continuous(breaks = custom_labels$martial_values, labels = custom_labels$custom_labels) + 
+  theme(legend.position = c(0.8, 0.2)) +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+## ratetopoverty
+
+```{r}
+# Define the ranges
+ranges <- list(c(0, 1),c(1,2), c(2, 3), c(3, 4),c(4,5))
+range_labels <- c("0-1", "1-2","2-3", "3-4","4-5")
+
+# Calculate confidence intervals for each range
+results_ratetopoverty <- data.frame(Range = range_labels, 
+                                    Lower_CI = rep(0, length(range_labels)), 
+                                    Upper_CI = rep(0, length(range_labels)))
+
+for (i in 1:length(ranges)) {
+  range_data <- data[data$ratetopoverty > ranges[[i]][1] & data$ratetopoverty <= ranges[[i]][2], "depression"]
+  boot_obj <- boot(range_data, bootstrap_ci, R = 1000)
+  ci <- boot.ci(boot_obj, type = "perc")
+  results_ratetopoverty[i, c("Lower_CI", "Upper_CI")] <- ci$percent[4:5]
+}
+```
+
+```{r}
+results_ratetopoverty
+```
+
+```{r}
+labels <- data.frame(
+  range = c(1,2,3,4,5), 
+  range_labels = c("0-1", "1-2","2-3", "3-4","4-5")
+)
+
+ggplot(results_ratetopoverty, aes(x = c(1,2,3,4,5))) +
+  geom_line(aes(y = Lower_CI, color = "Lower CI"), size = 1) + 
+  geom_line(aes(y = Upper_CI, color = "Upper CI"), size = 1) +
+  labs(title = "Confidence Intervals for Depression Probability by Rate to Poverty",
+       x = "Range of Rate to Poverty",
+       y = "Depression Probability",
+       color = "Confidence Interval") +  
+  scale_color_manual(values = c("Lower CI" = "blue", "Upper CI" = "red")) +
+  theme_minimal() +
+  scale_x_continuous(breaks = labels$range, labels = labels$range_labels) +
+  theme(legend.position = c(0.8, 0.8)) +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+labels <- data.frame(
+  range = c(1,2,3,4,5), 
+  range_labels = c("0-1", "1-2","2-3", "3-4","4-5")
+)
+
+plot1<- ggplot(results_ratetopoverty, aes(x = c(1,2,3,4,5))) +
+  geom_line(aes(y = Lower_CI, color = "Lower CI"), size = 1) + 
+  geom_line(aes(y = Upper_CI, color = "Upper CI"), size = 1) +
+  labs(title = "Confidence Intervals for Depression Probability by Rate to Poverty",
+       x = "Range of Rate to Poverty",
+       y = "Depression Probability",
+       color = "Confidence Interval") +  
+  scale_color_manual(values = c("Lower CI" = "blue", "Upper CI" = "red")) +
+  theme_minimal() +
+  scale_x_continuous(breaks = labels$range, labels = labels$range_labels) +
+  theme(legend.position = c(0.8, 0.8)) +
+  theme(plot.title = element_text(hjust = 0.5)) 
+  
+  
+custom_labels <- data.frame(
+  martial_values = c(1,2,3), 
+  custom_labels = c("married", "divorced", "spinsterhood")  
+)
+
+plot2 <- ggplot(results_education, aes(x = education_levels)) +
+  geom_line(aes(y = Lower_CI, color = "Lower CI"), size = 1) + 
+  geom_line(aes(y = Upper_CI, color = "Upper CI"), size = 1) +
+  labs(title = "Confidence Intervals for Depression Probability by Education Level",
+       x = "Education Level",
+       y = "Depression Probability",
+       color = "Confidence Interval") +  
+  scale_color_manual(values = c("Lower CI" = "blue", "Upper CI" = "red")) +
+  theme_minimal()+
+  theme(legend.position = c(0.8, 0.8))+
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+plot3 <- ggplot(results_martial, aes(x = martial_values)) +
+  geom_line(aes(y = Lower_CI, color = "Lower CI"), size = 1) + 
+  geom_line(aes(y = Upper_CI, color = "Upper CI"), size = 1) +
+  labs(title = "Confidence Intervals for Depression Probability by Martial values",
+       x = "Martial Values",
+       y = "Depression Probability",
+       color = "Confidence Interval") +  
+  scale_color_manual(values = c( "Upper CI" = "red","Lower CI" = "blue")) +
+  theme_minimal() +
+  scale_x_continuous(breaks = custom_labels$martial_values, labels = custom_labels$custom_labels) + 
+  theme(legend.position = c(0.8, 0.2)) +
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+grid.arrange(plot1, plot2, plot3, nrow = 1, widths = c(2, 2, 2))
+
+```
+
+```{r}
+bootstrap_prob <- function(data, indices) {
+  d <- data[indices] 
+  return(mean(d))
+}
+
+critical_values <- seq(0, 5, length.out = 21)
+
+results <- data.frame(Critical_Value = critical_values, 
+                      Below_Threshold = rep(0, length(critical_values)),
+                      Above_Threshold = rep(0, length(critical_values)),
+                      Difference = rep(0, length(critical_values)))
+
+# calculate the probability and difference under each critical value
+for (i in 1:length(critical_values)) {
+  threshold = critical_values[i]
+
+  # data under critical value
+  below_data <- data[data$ratetopoverty <= threshold, "depression"]
+  if(length(below_data) > 1) {
+    boot_below <- boot(below_data, bootstrap_prob, R = 1000)
+    results$Below_Threshold[i] <- mean(boot_below$t)
+  }
+
+  # data higher than critical value
+  above_data <- data[data$ratetopoverty > threshold, "depression"]
+  if(length(above_data) > 1) {
+    boot_above <- boot(above_data, bootstrap_prob, R = 1000)
+    results$Above_Threshold[i] <- mean(boot_above$t)
+  }
+
+  # calculate the difference
+  results$Difference[i] <- abs(results$Below_Threshold[i] - results$Above_Threshold[i])
+}
+
+# print output
+print(results)
+```
+
+## build model (KNN)
+
+```{r}
+merged_df <- read.csv("./knndata.csv")
+```
+
+```{r}
+
+train_idx<- sample(1:nrow(merged_df),nrow(merged_df)*0.8,replace = FALSE)
+
+interesteddf <- merged_df[train_idx,c("income","martial1","martial2","martial3","educationidx","score","gender1","gender2","age","depression")]
+
+
+TPs <- c()
+
+dedf <- interesteddf[interesteddf$depression==TRUE,]
+ndedf<-interesteddf[interesteddf$depression==FALSE,]
+
+for(i in 1:20){
+deidx <- sample(1:nrow(dedf),7000,replace = TRUE)
+ndeidx <- sample(1:nrow(ndedf),7000,replace = TRUE)
+
+balanceddf<-rbind(dedf[deidx,],ndedf[ndeidx,])
+
+
+test.in<- merged_df[-train_idx,c("income","martial1","martial2","martial3","educationidx","score","age","gender1","gender2","depression")]
+
+knn_model <- knn(train = balanceddf[,c(-10,-6)],
+                 test = test.in[,c(-6,-10)],
+                 cl = balanceddf$depression,
+                 k = 5)
+
+
+test.in$predicted_depression<-knn_model
+
+TP<-sum(test.in$predicted_depression==TRUE&test.in$depression==TRUE)/sum(test.in$depression==TRUE)
+TPs <- c(TPs,TP)}
+```
+
+```{r}
+newdf <- balanceddf[,c("score")]
+hist(newdf,breaks = 30,col="skyblue",xlab="score",main ="Depression Score Frequency after Over-sampling")
+```
+
+```         
+mean(TPs)
+```
+
+```{r}
+library(caret)
+
+# set the parameters
+ctrl <- trainControl(method = "cv", number = 10) 
+
+knn_model <- train(
+  x = balanceddf[, c(-6, -10)],  
+  y =as.factor( balanceddf$depression),  
+  method = "knn",
+  tuneGrid = expand.grid(k = seq(1, 20)),  
+  trControl = ctrl
+)
+
+# print the best k
+print(knn_model$bestTune)
+
+# print output
+print(knn_model)
+```
+
+```{r}
+balanceddf<-rbind(dedf[deidx,],ndedf[ndeidx,])
+
+
+test.in<- merged_df[-train_idx,c("income","martial1","martial2","martial3","educationidx","score","age","gender1","gender2","depression")]
+
+knn_model <- knn(train = balanceddf[,c(-10,-6)],
+                 test = test.in[,c(-6,-10)],
+                 cl = balanceddf$depression,
+                 k = 6)
+```
+
+```{r}
+confusionMatrix <- table(test.in$depression, knn_model)
+print(confusionMatrix)
+```
+
