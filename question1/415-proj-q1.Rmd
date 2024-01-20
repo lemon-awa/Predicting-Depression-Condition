@@ -1,0 +1,107 @@
+---
+title: "AddVariable"
+author: "Xixiao Pan, xixiaoxx"
+date: "2023-11-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(glmnet)
+data <- read.csv("data_add_var.csv")
+```
+## Scatter Plots of nine variables with Depression Score
+
+```{r}
+
+library(tidyr)
+library(ggplot2)
+long_data <- gather(data, key="variable", value="value", -Score, -depression)
+
+ggplot(long_data, aes(x=value, y=Score)) +
+  geom_point(color="lightblue") +
+  facet_wrap(~variable, scales="free") +
+  theme_minimal() +
+  labs(title="Scatter Plots of Variables vs Score", x="Value", y="Score")
+```
+## Lasso Regression and CV
+
+```{r}
+library(ROSE)
+set.seed(10)
+# Oversample the minority class(Score>10)
+data_oversampled <- ovun.sample(depression ~ ., data = data, method = "over",p=0.5, seed = 123)
+data <- data_oversampled$data
+x <- model.matrix(Score ~ ., data = data[, -11])[,-1]
+y <- data$Score
+
+cv_grid <- cv.glmnet(x, y, alpha = 1, nfolds = 5)
+
+# Fit a Lasso model
+lasso_model <- glmnet(x, y, alpha = 1, lambda = cv_grid$lambda.min)
+
+# Get the selected variables from Lasso
+lasso_coef <- coef(lasso_model)
+lasso_coef
+```
+
+## Random Forest
+```{r}
+library(randomForest)
+library(caret)
+library(ROSE)
+library(smotefamily)
+data <- read.csv("data_add_var.csv")
+set.seed(123)
+trainIndex <- createDataPartition(data$Score, p = 0.8, list = FALSE)
+data=(data[,-10])
+train_data <- data[trainIndex, ]
+test_data <- data[-trainIndex, ]
+data_oversampled <- ovun.sample(depression ~ ., data = train_data, method = "over",p=0.5, seed = 123)
+
+
+rf_model <- randomForest(Score ~ ., data = data_oversampled$data[,-c(10)], ntree = 200, mtry = 2 ,max.depth=50,importance=TRUE)
+rf_predictions_train <- predict(rf_model, newdata = train_data)
+rmse_train=sqrt(mean((rf_predictions_train-train_data$Score)^2))
+cat(rmse_train,'\n')
+rf_predictions <- predict(rf_model, newdata = test_data)
+rmse=sqrt(mean((rf_predictions - test_data$Score)^2))
+cat(rmse)
+```
+
+## Visualize Distribution of Depression Score
+
+```{r}
+score_hist=ggplot(data, aes(x = Score, fill = ..count..),color="skyblue") +
+  geom_histogram(binwidth = 1, color = "white", alpha = 0.7, fill = "skyblue") +
+  labs( x = "Depression Score", y = "Frequency",size=26) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 16),
+    axis.title=element_text(size=18)
+
+  )
+   #theme(plot.title = element_text(hjust = 0.5))
+ggsave("score_hist.png",score_hist,dpi=150)
+```
+
+```{r}
+summary(rf_model)
+importance_values <- importance(rf_model)
+importance_values
+IncMSE=importance_values[,1]
+print(importance_values)
+varImpPlot(rf_model)
+
+IncMSE_sorted=IncMSE[order(IncMSE)]
+names(IncMSE)[names(IncMSE)=="HS"]="CRP"
+# Create a bar plot of %IncMSE values
+barplot(IncMSE_sorted,  col = "skyblue",
+        main = "Variable Importance (%IncMSE)",
+        xlab = "Variable", ylab = "%IncMSE")
+
+
+```

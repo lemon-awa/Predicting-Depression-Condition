@@ -1,0 +1,65 @@
+---
+title: "prediction"
+output: html_document
+date: "2023-11-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(randomForest)
+library(caret)
+library(ROSE)
+```
+
+```{r}
+# data contains Score and other predictons
+data=read.csv("D:/23FA/415/project/question1/data_for_train.csv")
+
+# split training and test data
+trainIndex <- createDataPartition(data$Score, p = 0.8, list = FALSE)
+train_data <- data[trainIndex, ]
+test_data <- data[-trainIndex, ]
+
+
+# Oversample the minority class(Score>10)
+data_oversampled <- ovun.sample(depression ~ ., data = train_data, method = "over",p=0.5, seed = 123)
+
+#half of the points have score greater than 10
+table(data_oversampled$data$Score)
+
+# important: remove "depression" when training
+rf_model <- randomForest(Score ~ ., data = data_oversampled$data[,-10], ntree = 100, mtry = 5)
+
+# make predictions on both training and test data
+rf_predictions_train <- predict(rf_model,newdata=train_data)
+rf_predictions <- predict(rf_model, newdata = test_data)
+rf_predictions_oversample <-predict(rf_model,newdata=data_oversampled$data)
+# calculate MSE
+mse_rf_train <- mean((rf_predictions_train - train_data$Score)^2)
+mse_rf <- mean((rf_predictions - test_data$Score)^2)
+mse_rf_oversample <- mean((rf_predictions_oversample - data_oversampled$data$Score)^2)
+
+mse_rf
+mse_rf_train
+mse_rf_oversample
+```
+
+```{r}
+# compare with prediction and real value
+plot(rf_predictions,test_data$Score)
+abline(a = 0, b = 1, col = "red")
+plot(rf_predictions_train,train_data$Score)
+abline(a = 0, b = 1, col = "red")
+plot(rf_predictions_oversample,data_oversampled$data$Score)
+abline(a = 0, b = 1, col = "red")
+
+print(table(test_data$Score)/length(test_data$Score))
+print(table(data$Score)/length(data$Score))
+
+# classification result
+predicted_depression_class=ifelse(rf_predictions>10,1,0)
+table(predicted_depression_class,test_data$depression)
+```
